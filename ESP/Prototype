@@ -1,26 +1,26 @@
 // define BUTTONS
-#define BUTTON 32
-#define BUTTON2 14
+const byte BUTTON = 32;
+const byte BUTTON2 = 14;
 
 // define ISD1820
-const int REC = 27;  // pin 27 is used for recording
-const int PLAY = 25; // pin 25 is used for playback-edge trigger
+const byte REC = 27;  // pin 27 is used for recording
+const byte PLAY = 25; // pin 25 is used for playback-edge trigger
 
 // define LED pins
-#define LED1 = 15;
-#define LED2 = 33;
-#define LED3 = 0;
-#define LED4 = 12;
-#define LED5 = 18;
-#define LED6 = 17;
+const byte LED1 = 15;
+const byte LED2 = 33;
+const byte LED3 = 0;
+const byte LED4 = 12;
+const byte LED5 = 18;
+const byte LED6 = 17;
+const byte LED7 = 13;
+const byte LED8 = 4;
 
 // define number of led's
-#define NumberOfLeds 6
+const byte NumberOfLeds = 8;
 
-uint8_t leds [] = { 15, 33, 0, 12, 18, 17 }; // list of all the leds in the array
-
-#define EVENT_UPDATE_TIME 6000 // in milliseconds 
-volatile unsigned long timingMillis = 0; // volatile will work with interrupts
+//put led's into array
+uint8_t leds [] = { 15, 33, 0, 12, 18, 17, 13, 4 }; // list of all the leds in the array
 
 // setting PWM properties
 const int freq = 5000;
@@ -29,22 +29,52 @@ const int resolution = 8;
 
 int brightnessON = 250;
 int brightnessOFF = 0;
+int fadeAmount = 55;    // how many points to fade the LED by
+
+// define time events
+unsigned long buttonPushedMillis; // when button was released
+unsigned long button2PushedMillis; // when button was released
+unsigned long ledTurnedOnAt; // when led was turned on
+unsigned long led2TurnedOnAt; // when led was turned on
+unsigned long turnOnDelay = 20; // wait to turn on LED, 20 almost instant
+unsigned long turn2OnDelay = 20; // wait to turn on LED, 20 almost instant
+unsigned long turnOffDelay = 6000; // turn off LED after this time
+unsigned long turn2OffDelay = 6000; // turn off LED after this time
 
 // define status to reset the loops
-char status = 0;
+char status1 = 0;
+char status2 = 0;
 
 // define button's statuses
 int buttonState = 0;
 int buttonState2 = 0;
 
+// define led's statuses
+bool ledReady = false; // flag for when button is let go
+bool led2Ready = false; // flag for when button is let go
+bool ledState = false; // for LED is on or not.
+bool led2State = false; // for LED is on or not.
+// What states can we have? For LEDs this might be levels, patterns, etc. For sound this might be frequency. For motion this might be rotation or speed.
+enum state {BUTTON1, BUTTON_01_OFF, BUTTON_02, BUTTON_02_OFF}; // define four states for our output
+
+// We want to keep track of our current output state and previous state
+int state = 6; // values need to be different
+int lastState = 7; // values need to be different
+
+//// How often should we check our sensor in milliseconds?
+//#define EVENT_UPDATE_TIME 1000 // in milliseconds 
+//unsigned long timingMillis = 0; //
+
+
 
 void setup() {
+
   // begin serial communication
   Serial.begin(115200);
 
   // BUTTONS set up + built in resistor, no need to add any to the board
   pinMode(BUTTON, INPUT_PULLUP); //oznaczan domyslnie na pinie stan HIGH _PULLUP
-  pinMode(BUTTON, INPUT_PULLUP); //oznaczan domyslnie na pinie stan HIGH _PULLUP
+  pinMode(BUTTON2, INPUT_PULLUP); //oznaczan domyslnie na pinie stan HIGH _PULLUP
 
   // ISD1820 set up
   pinMode(REC, OUTPUT);
@@ -54,71 +84,145 @@ void setup() {
   for (int k = 0; k < NumberOfLeds; k++) {
     ledcAttachPin(leds[k], ledChannel);
   }
-
   ledcSetup (0, 5000, 8);
+  //digitalWrite(LED1, LOW);
+
 }
 
 
 void loop() {
 
-  // READ BUTTON VALUE
-  int buttonState = digitalRead(BUTTON);
 
-  // if button is pressed, start LED's and recording
-  if (( buttonState == LOW ) && (status == 0)) {
-    status = 1;
-    Serial.println("button wciśnięty");
+  // get the time at the start of this loop()
+  unsigned long currentMillis = millis();
 
-//    FADE_IN_OUT_LED ();
-    LEDs_ON ();
-    RECORDING ();
-    PLAYBACK ();
-  }
-  // if button is no pressed, LED's OFF
-  else {
-
-    ( buttonState == HIGH );
-    Serial.println("button puszczony");
-
-    LEDs_OFF ();
-  }
-
-  // RESET BUTTON STATE TO AVOID CONTINUOUS LOOP
-  if (( buttonState == HIGH ) && (status == 1)) {
-    status = 0;
-  }
-
-  // READ BUTTON2 VALUE
+  int buttonState = digitalRead(BUTTON); // store the value from our button
   int buttonState2 = digitalRead(BUTTON2);
-  if (( buttonState2 == LOW ) && (status == 0)) {
-    status = 1;
+
+
+  // state BUTTON1 - start led & recording
+
+  if (( buttonState == LOW ) && (status1 == 0)) {
+    status1 = 1;
+    Serial.println("button wciśnięty");
+    //record the start of button press
+    buttonPushedMillis = currentMillis;
+    ledReady = true;
+    state = BUTTON1;
+  }
+
+  // state BUTTON_01_OFF - stop led & recording
+
+  else if (( buttonState == HIGH ) && (status1 == 1)) {
+    status1 = 0;
+    Serial.println("button1 puszczony");
+    state = BUTTON_01_OFF;
+  }
+
+  // state BUTTON_02 - start led & playback
+
+  else if (( buttonState2 == LOW ) && (status2 == 0)) {
+    status2 = 1;
     Serial.println("button2 wciśnięty");
-
-    LEDs_ON ();
-    PLAYBACK ();
-
+    button2PushedMillis = currentMillis;
+    led2Ready = true;
+    state = BUTTON_02;
   }
-  // RESET BUTTON STATE2 TO AVOID CONTINUOUS LOOP
-  if (( buttonState2 == HIGH ) && (status == 1)) {
-    status = 0;
-  }
-}
 
-void FADE_IN_OUT_LED () {
-  //BREATHING PATTERN
+  // state BUTTON_02_OFF - stop led & playback
+
+  else if (( buttonState2 == HIGH ) && (status2 == 1)) {
+    status2 = 0;
+    Serial.println("button2 puszczony");
+    state = BUTTON_02_OFF;
+  }
+
+  // only change our output if it needs to be changed
+  if (state != lastState) {
+
+    switch (state) {
+
+      case BUTTON1:// what should we do when BUTTON1?
+        Serial.println("button1 wciśnięty - REC + LED started");
+        // make sure this code isn't checked until after button has been let go
+        if (ledReady) {
+
+          if ((unsigned long)(currentMillis - buttonPushedMillis) >= turnOnDelay) {
+            // enough time has passed since the button was let go.
+
+            LEDs_ON ();
+            RECORDING_ON ();
+
+            // setup our next "state"
+            ledState = true;
+            // save when the LED turned on
+            ledTurnedOnAt = currentMillis;
+            // wait for next button press
+            ledReady = false;
+          }
+        }
+        break;
+
+      case BUTTON_01_OFF: // what should we do when BUTTON_01_OFF?
   
-  // PWM FADE IN
-  for (int dutyCycle = 0; dutyCycle <= 255; dutyCycle++) {
-    ledcWrite(ledChannel, dutyCycle);
-    delay(15);
-  }
-  // PWM FADE OUT
-  for (int dutyCycle = 255; dutyCycle >= 0; dutyCycle--) {
-    // changing the LED brightness with PWM
-    ledcWrite(ledChannel, dutyCycle);
-    delay(15);
+        // see if we are watching for the time to turn off LED
+        if (ledState) {
+          // okay, led on, check for now long
+          if ((unsigned long)(currentMillis - ledTurnedOnAt) >= turnOffDelay) {
+            ledState = false;
+
+            RECORDING_OFF ();
+            LEDs_OFF ();
+            Serial.println("button1 puszczony -  REC + LED finished");
+          }
+        }
+        break;
+
+      case BUTTON_02: // what should we do when BUTTON_02?
+        Serial.println("button2 wciśnięty - PLAY + LED started");
+        // make sure this code isn't checked until after button has been let go
+        if (led2Ready) {
+
+          if ((unsigned long)(currentMillis - button2PushedMillis) >= turn2OnDelay) {
+            // enough time has passed since the button was let go.
+
+            LEDs_ON ();
+            PLAYBACK_ON ();
+
+            // setup our next "state"
+            led2State = true;
+            // save when the LED turned on
+            led2TurnedOnAt = currentMillis;
+            // wait for next button press
+            led2Ready = false;
+          }
+        }
+        break;
+
+      case BUTTON_02_OFF: // what should we do when BUTTON_02_OFF?
+        
+        // see if we are watching for the time to turn off LED
+        if (led2State) {
+          // okay, led on, check for now long
+          if ((unsigned long)(currentMillis - led2TurnedOnAt) >= turn2OffDelay) {
+            led2State = false;
+
+            PLAYBACK_OFF ();
+            LEDs_OFF ();
+            Serial.println("button2 puszczony -  PLAY + LED finished");
+          }
+        }
+        break;
+
+      default:
+        Serial.println("do nothing");
+        break;
+    }
   }
 }
+//////////////////////////////////////////////////////////////////////////////////////////////////
+
+//LEDS
 
 void LEDs_ON () {
 
@@ -136,22 +240,26 @@ void LEDs_OFF () {
   }
 }
 
-void RECORDING () {
+////////////////////////////////////////////////////////////////////////////////////////////////
 
-  // FULL RECORDING FUNCTION
+// ISD1820
+
+void RECORDING_ON () {
   digitalWrite(REC, HIGH);
   Serial.println("REC + LED started");
-  delay(5000);
+}
+
+void RECORDING_OFF () {
   digitalWrite(REC, LOW);
   Serial.println("REC finished");
 }
 
-void PLAYBACK () {
-
-  // FULL PLAYBACK FUNCTION
+void PLAYBACK_ON () {
   digitalWrite(PLAY, HIGH);
   Serial.println("PLAY + LED started");
-  delay(5000);
+}
+
+void PLAYBACK_OFF () {
   digitalWrite(PLAY, LOW);
   Serial.println("PLAY finished");
 }
